@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="pg_logo.png" alt="Perfect Game Logo" width="200"/>
+</div>
+
 # Perfect Game Team Scraper
 
 A Python program that scrapes player statistics from Perfect Game team pages. Extracts comprehensive player data including batting statistics (At Bats, Batting Average, OPS, Slugging) and pitching statistics (ERA, WHIP, Strike %, Innings Pitched).

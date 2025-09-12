@@ -53,6 +53,10 @@ logs/
 *.csv
 !example_team_output.csv
 
+# Keep logo and documentation images
+!pg_logo.png
+!*.png
+
 # Temporary files
 *.tmp
 *.temp
