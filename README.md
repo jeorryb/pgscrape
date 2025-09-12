@@ -173,6 +173,8 @@ Data is saved to a CSV file and also displayed in the terminal.
 - `lxml`: High-performance XML/HTML parser (required)
 - `urllib3`: URL handling utilities
 
+**Note**: Selenium is NOT required. The scraper uses pure HTTP requests with session management for authentication.
+
 ### How It Works
 
 1. **Authentication**: If credentials are provided, the scraper attempts to log into Perfect Game
