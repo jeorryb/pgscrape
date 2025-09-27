@@ -11,8 +11,8 @@ A Python program that scrapes player statistics from Perfect Game team pages. Ex
 ## Quick Start
 
 ```bash
-# Scrape a team
-python3 pg_scraper.py "https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917" --username "your_email" --password "your_password"
+# Scrape a team (just use the team ID!)
+python3 pg_scraper.py 967917 --username "your_email" --password "your_password"
 
 # Test a single player
 python3 pg_scraper.py --test-profile "https://www.perfectgame.org/Players/Playerprofile.aspx?ID=1161417" --username "your_email" --password "your_password"
@@ -71,14 +71,21 @@ chmod +x pg_scraper.py
 
 ## Usage
 
-### Perfect Game URL Format
+### Perfect Game Team ID Format
 
-The scraper works with Perfect Game tournament team URLs in this format:
+The scraper now accepts just the team ID instead of the full URL! Simply use the team ID number from the Perfect Game team page.
+
+**Old way (still works):**
 ```
-https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=TEAM_ID
+https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917
 ```
 
-For example: `https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917`
+**New simplified way:**
+```
+967917
+```
+
+The scraper automatically constructs the full URL from the team ID.
 
 ### Basic Usage (without authentication)
 
@@ -87,7 +94,7 @@ For example: `https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?
 source venv/bin/activate  # On macOS/Linux
 # venv\Scripts\activate   # On Windows
 
-python pg_scraper.py "https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917"
+python pg_scraper.py 967917
 ```
 
 ### With Authentication
@@ -97,17 +104,19 @@ python pg_scraper.py "https://www.perfectgame.org/Events/Tournaments/Teams/Defau
 source venv/bin/activate  # On macOS/Linux
 # venv\Scripts\activate   # On Windows
 
-python pg_scraper.py "https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917" -u your_email -p your_password
+python pg_scraper.py 967917 -u your_email -p your_password
 ```
 
 ### Command Line Options
 
-- `team_url`: The URL of the Perfect Game team page (required)
+- `team_id`: The Perfect Game team ID (e.g., 967917) - much simpler than full URL!
 - `-u, --username`: Perfect Game email address for authentication (optional)
 - `-p, --password`: Perfect Game password for authentication (optional)
 - `-o, --output`: Output CSV filename (default: team_stats.csv)
 - `-v, --verbose`: Enable verbose logging
 - `-h, --help`: Show help message
+
+**Backward Compatibility**: You can still provide full URLs if needed - the script detects and handles both formats.
 
 ### Examples
 
@@ -116,13 +125,13 @@ python pg_scraper.py "https://www.perfectgame.org/Events/Tournaments/Teams/Defau
 source venv/bin/activate  # On macOS/Linux
 
 # Basic scraping without authentication
-python pg_scraper.py "https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917"
+python pg_scraper.py 967917
 
 # With authentication and custom output file  
-python pg_scraper.py "https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917" -u myemail@example.com -p mypassword -o my_team_stats.csv
+python pg_scraper.py 967917 -u myemail@example.com -p mypassword -o my_team_stats.csv
 
 # With verbose logging
-python pg_scraper.py "https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917" -v
+python pg_scraper.py 967917 -v
 ```
 
 ## Output

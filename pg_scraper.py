@@ -501,7 +501,7 @@ class PerfectGameScraper:
 def main():
     """Main function to run the scraper from command line."""
     parser = argparse.ArgumentParser(description='Perfect Game scraper with working authentication')
-    parser.add_argument('team_url', nargs='?', help='Perfect Game team URL')
+    parser.add_argument('team_id', nargs='?', help='Perfect Game team ID (e.g., 967917)')
     parser.add_argument('--test-profile', help='Test with a single player profile URL')
     parser.add_argument('-u', '--username', help='Perfect Game username')
     parser.add_argument('-p', '--password', help='Perfect Game password')
@@ -514,14 +514,24 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     # Validate arguments
-    if not args.test_profile and not args.team_url:
-        print("❌ Please provide either a team URL or --test-profile URL")
+    if not args.test_profile and not args.team_id:
+        print("❌ Please provide either a team ID or --test-profile URL")
         print("\nExamples:")
         print("  Team scraping:")
-        print("    python3 working_scraper.py 'https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917' --username 'email' --password 'pass'")
+        print("    python3 pg_scraper.py 967917 --username 'email' --password 'pass'")
         print("  Single player test:")
-        print("    python3 working_scraper.py --test-profile 'https://www.perfectgame.org/Players/Playerprofile.aspx?ID=1161417' --username 'email' --password 'pass'")
+        print("    python3 pg_scraper.py --test-profile 'https://www.perfectgame.org/Players/Playerprofile.aspx?ID=1161417' --username 'email' --password 'pass'")
         sys.exit(1)
+    
+    # Convert team ID to full URL if provided
+    team_url = None
+    if args.team_id:
+        # Check if it's already a full URL (for backward compatibility)
+        if args.team_id.startswith('http'):
+            team_url = args.team_id
+        else:
+            # Construct URL from team ID
+            team_url = f"https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team={args.team_id}"
     
     try:
         scraper = PerfectGameScraper(username=args.username, password=args.password)
@@ -553,11 +563,11 @@ def main():
                 print("❌ Authentication failed")
         
         # Team scraping mode
-        elif args.team_url:
+        elif team_url:
             print("🏆 SCRAPING TEAM DATA")
             print("="*60)
             
-            players = scraper.scrape_team(args.team_url)
+            players = scraper.scrape_team(team_url)
             
             if players:
                 # Save to CSV
