@@ -256,18 +256,40 @@ class PerfectGameScraper:
             self.logger.error(f"Error finding roster table players: {e}")
             return None
 
+    def _looks_like_team_name(self, name):
+        """Return False if text is likely promo/ad content, not a team name."""
+        if not name or len(name) < 2:
+            return False
+        s = name.strip().upper()
+        # Reject promo-style text (all caps + underscores, or known ad phrases)
+        if "_" in s and s.replace("_", "").replace(" ", "").isalnum():
+            return False
+        promo_keywords = ("SPEND", "SAVE_MORE", "MORE_SAVE", "SIGN UP", "LOG IN", "PERFECT GAME")
+        if any(kw in s for kw in promo_keywords):
+            return False
+        # Team names usually have spaces or mixed case, and reasonable length
+        if len(name) > 80:
+            return False
+        return True
+
     def _extract_team_name(self, soup):
         """Extract team name from team page HTML (e.g. 'Georgia Bombers 13U')."""
-        h1 = soup.find("h1")
-        if h1:
+        # Try all h1s; skip promo-style text (e.g. SPEND_MORE_SAVE_MORE)
+        for h1 in soup.find_all("h1"):
             name = h1.get_text(strip=True)
-            if name and len(name) > 1:
+            if name and self._looks_like_team_name(name):
                 return name
+        # Fallback: parse title (e.g. "Team Name | Perfect Game")
         title = soup.find("title")
         if title:
-            name = title.get_text(strip=True)
-            if name and len(name) > 1:
-                return name
+            raw = title.get_text(strip=True)
+            for sep in (" | ", " – ", " - "):
+                if sep in raw:
+                    name = raw.split(sep)[0].strip()
+                    if name and self._looks_like_team_name(name):
+                        return name
+            if raw and self._looks_like_team_name(raw):
+                return raw
         return None
 
     def scrape_team(self, team_url):
