@@ -18,13 +18,24 @@ python3 pg_scraper.py 967917 --username "your_email" --password "your_password"
 python3 pg_scraper.py --test-profile "https://www.perfectgame.org/Players/Playerprofile.aspx?ID=1161417" --username "your_email" --password "your_password"
 ```
 
+### Streamlit Web App
+
+For a browser UI (great for iPhone or sharing), run the Streamlit app:
+
+```bash
+pip install -r requirements.txt   # includes streamlit
+streamlit run streamlit_app.py
+```
+
+Then paste a team URL or team ID (e.g. `1056361` or a full PGBA team page URL). The CSV is named after the team (e.g. `Georgia_Bombers_13U.csv`) and can be downloaded with one click. Optional: expand "Optional: Perfect Game login" to add credentials.
+
 ## Features
 
 - Scrapes Perfect Game team pages for player statistics
 - Supports authentication with Perfect Game credentials
 - Extracts comprehensive baseball statistics: At Bats, Batting Average, OPS, Slugging, ERA, WHIP, Strike %, Innings Pitched
-- Saves data to CSV format
-- Command-line interface for easy usage
+- Saves data to CSV format (filename from team name when available)
+- Command-line interface and optional Streamlit web app
 - Respectful scraping with delays and proper headers
 - Comprehensive error handling and logging
 
@@ -73,19 +84,23 @@ chmod +x pg_scraper.py
 
 ### Perfect Game Team ID Format
 
-The scraper now accepts just the team ID instead of the full URL! Simply use the team ID number from the Perfect Game team page.
+The scraper accepts a full team page URL or just the team ID. When you pass a URL (PGBA or Events), it uses the page as-is and extracts the team ID for the default CSV filename.
 
-**Old way (still works):**
+**Full PGBA URL (team ID is taken from `team=` in the URL):**
 ```
-https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team=967917
+https://www.perfectgame.org/PGBA/Team/default.aspx?orgid=11923&orgteamid=264258&team=1056361&year=2026
 ```
 
-**New simplified way:**
+**Numeric team ID (scraper builds the Events URL):**
 ```
 967917
 ```
+or
+```
+1056361
+```
 
-The scraper automatically constructs the full URL from the team ID.
+If you don’t set `-o`, the CSV is named from the team name on the page (e.g. `Georgia_Bombers_13U.csv`) or `team_{id}.csv` if the name isn’t found.
 
 ### Basic Usage (without authentication)
 

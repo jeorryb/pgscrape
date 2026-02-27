@@ -11,13 +11,44 @@ import logging
 import re
 import sys
 import time
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qs
 
 import requests
 from bs4 import BeautifulSoup
 
 # pandas is now required for CSV handling
 import pandas as pd
+
+
+def normalize_team_input(url_or_id):
+    """
+    Parse team URL or numeric ID into (team_id, team_url).
+    Accepts full PGBA/Events URLs or a bare team ID (e.g. 1056361).
+    Returns (team_id, team_url) or (None, None) if invalid.
+    """
+    s = (url_or_id or "").strip()
+    if not s:
+        return None, None
+    if s.startswith("http://") or s.startswith("https://"):
+        parsed = urlparse(s)
+        qs = parse_qs(parsed.query)
+        team_id = (qs.get("team") or [None])[0]
+        if team_id:
+            return team_id, s
+        return "unknown", s  # URL has no team= param; use as-is, id unknown
+    if s.isdigit():
+        return s, f"https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team={s}"
+    return None, None
+
+
+def sanitize_filename(name):
+    """Convert a team name to a safe CSV filename (alphanumeric and underscores)."""
+    if not name:
+        return None
+    s = re.sub(r"[^\w\s-]", "", str(name))
+    s = re.sub(r"[-\s]+", "_", s).strip("_")
+    return s[:80] if s else None
+
 
 class PerfectGameScraper:
     """
@@ -224,7 +255,21 @@ class PerfectGameScraper:
         except Exception as e:
             self.logger.error(f"Error finding roster table players: {e}")
             return None
-    
+
+    def _extract_team_name(self, soup):
+        """Extract team name from team page HTML (e.g. 'Georgia Bombers 13U')."""
+        h1 = soup.find("h1")
+        if h1:
+            name = h1.get_text(strip=True)
+            if name and len(name) > 1:
+                return name
+        title = soup.find("title")
+        if title:
+            name = title.get_text(strip=True)
+            if name and len(name) > 1:
+                return name
+        return None
+
     def scrape_team(self, team_url):
         """Scrape team page and extract player data."""
         try:
@@ -238,6 +283,7 @@ class PerfectGameScraper:
             response.raise_for_status()
             
             soup = BeautifulSoup(response.content, 'html.parser')
+            team_name = self._extract_team_name(soup)
             players = []
             
             # Look for the actual team roster table
@@ -321,11 +367,11 @@ class PerfectGameScraper:
                     continue
             
             self.logger.info(f"✅ Successfully processed {len(players)} players")
-            return players
+            return players, team_name
             
         except Exception as e:
             self.logger.error(f"❌ Error scraping team: {e}")
-            return []
+            return [], None
     
     def get_player_profile_data(self, profile_url):
         """Extract player data from profile page."""
@@ -352,7 +398,8 @@ class PerfectGameScraper:
                 'OPS': 'N/A',
                 'Slugging': 'N/A',
                 'ERA': 'N/A',
-                'Innings Pitched': 'N/A'
+                'Innings Pitched': 'N/A',
+                'FB Velo': 'N/A'
             }
             
             # Extract basic player info
@@ -437,6 +484,17 @@ class PerfectGameScraper:
                         self.logger.info(f"✅ {stat_name}: {value}")
                         stats_found += 1
             
+            # FB Velo from PG Career Progression (lblTopStat when stat name is FB Velo)
+            stat_name_span = soup.find('span', {'id': lambda x: x and 'lblStatName' in x})
+            if stat_name_span and stat_name_span.get_text(strip=True).lower() == 'fb velo':
+                top_stat_span = soup.find('span', {'id': lambda x: x and 'lblTopStat' in x})
+                if top_stat_span:
+                    fb_velo_val = top_stat_span.get_text(strip=True)
+                    if self._is_valid_stat(fb_velo_val):
+                        player_data['FB Velo'] = fb_velo_val
+                        self.logger.info(f"✅ FB Velo: {fb_velo_val}")
+                        stats_found += 1
+            
             if stats_found > 0:
                 self.logger.info(f"✅ Found {stats_found} advanced statistics")
             else:
@@ -481,7 +539,7 @@ class PerfectGameScraper:
             preferred_order = [
                 'Name', 'Height', 'Weight', 'Bats/Throws', 'Graduation Year',
                 'School', 'Hometown', 'At Bats', 'Batting Average', 'OPS', 'Slugging', 
-                'ERA', 'WHIP', 'Strike %', 'Innings Pitched'
+                'ERA', 'WHIP', 'Strike %', 'Innings Pitched', 'FB Velo'
             ]
             
             # Reorder columns: preferred fields first, then any additional fields
@@ -523,15 +581,13 @@ def main():
         print("    python3 pg_scraper.py --test-profile 'https://www.perfectgame.org/Players/Playerprofile.aspx?ID=1161417' --username 'email' --password 'pass'")
         sys.exit(1)
     
-    # Convert team ID to full URL if provided
-    team_url = None
+    # Convert team ID or URL to (team_id, team_url)
+    team_id, team_url = None, None
     if args.team_id:
-        # Check if it's already a full URL (for backward compatibility)
-        if args.team_id.startswith('http'):
-            team_url = args.team_id
-        else:
-            # Construct URL from team ID
-            team_url = f"https://www.perfectgame.org/Events/Tournaments/Teams/Default.aspx?team={args.team_id}"
+        team_id, team_url = normalize_team_input(args.team_id)
+        if not team_url:
+            print("❌ Invalid team URL or ID. Use a full PGBA/Events URL or a numeric team ID.")
+            sys.exit(1)
     
     try:
         scraper = PerfectGameScraper(username=args.username, password=args.password)
@@ -567,11 +623,17 @@ def main():
             print("🏆 SCRAPING TEAM DATA")
             print("="*60)
             
-            players = scraper.scrape_team(team_url)
+            players, team_name = scraper.scrape_team(team_url)
             
             if players:
+                # Default output filename from team name or team ID
+                output = args.output
+                if output == "team_stats.csv":
+                    safe_name = sanitize_filename(team_name) if team_name else None
+                    output = f"{safe_name}.csv" if safe_name else f"team_{team_id}.csv"
+                
                 # Save to CSV
-                scraper.save_to_csv(players, args.output)
+                scraper.save_to_csv(players, output)
                 
                 print(f"\n✅ Successfully scraped {len(players)} players!")
                 print("="*60)
@@ -598,7 +660,7 @@ def main():
                         if value != 'N/A':
                             print(f"    {stat}: {value}")
                 
-                print(f"\n💾 Full data saved to: {args.output}")
+                print(f"\n💾 Full data saved to: {output}")
                 
             else:
                 print("❌ No player data found. Please check the team URL and try again.")
