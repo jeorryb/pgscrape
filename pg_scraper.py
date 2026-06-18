@@ -456,6 +456,10 @@ class PerfectGameScraper:
 
     def _is_paywalled(self, soup):
         """Detect the DiamondKast Plus gate that hides advanced stats."""
+        # If the logged-in account already has DiamondKast Plus, stats are accessible.
+        level_span = self._span_by_id_suffix(soup, 'lblYourLevel', 'lblyourlevel')
+        if level_span and 'diamondkast' in level_span.get_text(strip=True).lower():
+            return False
         text = soup.get_text(" ", strip=True).lower()
         gates = (
             'subscription is required to access',
@@ -503,6 +507,14 @@ class PerfectGameScraper:
                 if year_match:
                     player_data['Graduation Year'] = year_match.group(1)
                     self.logger.info(f"✅ Graduation Year: {player_data['Graduation Year']}")
+
+            # Hometown — available directly on the player profile page
+            hometown_span = self._span_by_id_suffix(soup, 'lblHomeTown', 'lblhometown')
+            if hometown_span:
+                hometown = hometown_span.get_text(strip=True)
+                if hometown and hometown not in ('-', 'N/A'):
+                    player_data['Hometown'] = hometown
+                    self.logger.info(f"✅ Hometown: {player_data['Hometown']}")
             
         except Exception as e:
             self.logger.warning(f"Error extracting player info: {e}")
