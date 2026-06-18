@@ -436,23 +436,53 @@ class PerfectGameScraper:
             self.logger.error(f"Error processing player profile {profile_url}: {e}")
             return None
     
+    def _span_by_id_suffix(self, soup, *needles):
+        """
+        Find the first <span> whose id ENDS WITH or CONTAINS any of the needles.
+
+        Resilient to ASP.NET regenerating the container prefix (e.g.
+        ctl00$ctl00$ContentTopLevel$ContentPlaceHolder1$...). The trailing
+        control name (lblHt, lblPlayerName, etc.) is what stays stable across
+        layout changes, so we match on that instead of the full id string.
+        """
+        needles_l = [n.lower() for n in needles]
+        # Prefer an exact-suffix match, then fall back to a substring match.
+        for matcher in (str.endswith, str.__contains__):
+            for span in soup.find_all('span', id=True):
+                sid = span.get('id', '').lower()
+                if any(matcher(sid, n) for n in needles_l):
+                    return span
+        return None
+
+    def _is_paywalled(self, soup):
+        """Detect the DiamondKast Plus gate that hides advanced stats."""
+        text = soup.get_text(" ", strip=True).lower()
+        gates = (
+            'subscription is required to access',
+            'upgrade now to access',
+            'advanced statistics & more exclusive content',
+        )
+        return any(g in text for g in gates)
+
     def _extract_player_info(self, soup, player_data):
         """Extract basic player information."""
         try:
-            # Player name
-            name_span = soup.find('span', {'id': 'ContentTopLevel_ContentPlaceHolder1_lblPlayerName'})
+            # Player name — match by trailing control name, not the full auto-id
+            name_span = self._span_by_id_suffix(
+                soup, 'lblPlayerName', 'lblplayer_name', 'lblfullname', 'lblname'
+            )
             if name_span:
                 player_data['Name'] = name_span.get_text(strip=True)
                 self.logger.info(f"✅ Name: {player_data['Name']}")
             
             # Height
-            height_span = soup.find('span', {'id': 'ContentTopLevel_ContentPlaceHolder1_lblHt'})
+            height_span = self._span_by_id_suffix(soup, 'lblHt', 'lblheight')
             if height_span:
                 player_data['Height'] = height_span.get_text(strip=True)
                 self.logger.info(f"✅ Height: {player_data['Height']}")
             
             # Weight
-            weight_span = soup.find('span', {'id': 'ContentTopLevel_ContentPlaceHolder1_lblWt'})
+            weight_span = self._span_by_id_suffix(soup, 'lblWt', 'lblweight')
             if weight_span:
                 weight_text = weight_span.get_text(strip=True).strip().lstrip('\u00a0').strip()
                 if weight_text:
@@ -460,13 +490,13 @@ class PerfectGameScraper:
                     self.logger.info(f"✅ Weight: {player_data['Weight']}")
             
             # Bats/Throws
-            bt_span = soup.find('span', {'id': 'ContentTopLevel_ContentPlaceHolder1_lblBT'})
+            bt_span = self._span_by_id_suffix(soup, 'lblBT', 'lblbatsthrows', 'lblb_t')
             if bt_span:
                 player_data['Bats/Throws'] = bt_span.get_text(strip=True)
                 self.logger.info(f"✅ Bats/Throws: {player_data['Bats/Throws']}")
             
             # Graduation year
-            grad_span = soup.find('span', {'id': 'ContentTopLevel_ContentPlaceHolder1_lblHSGrad'})
+            grad_span = self._span_by_id_suffix(soup, 'lblHSGrad', 'lblgrad', 'lblgradyear')
             if grad_span:
                 grad_text = grad_span.get_text(strip=True)
                 year_match = re.search(r'(\d{4})', grad_text)
@@ -481,31 +511,46 @@ class PerfectGameScraper:
         """Extract statistics from the page."""
         try:
             self.logger.info("🔍 Extracting statistics...")
-            
-            # Define statistics to extract with their span patterns
+
+            if self._is_paywalled(soup):
+                self.logger.warning(
+                    "🔒 Advanced stats appear gated behind a DiamondKast Plus "
+                    "subscription for this session — values are not in the HTML. "
+                    "Confirm the logged-in account has the required tier."
+                )
+
+            # Match on the stable trailing token only, NOT the ctlNN repeater
+            # index, which shifts whenever the stats section is restructured.
+            # e.g. old id ..._ctl04_lbl_A_PB_S_OPS -> we only require 'lbl_a_pb_s_ops'.
             stat_patterns = {
-                'OPS': lambda x: x and x.endswith('_ctl04_lbl_A_PB_S_OPS'),
-                'Batting Average': lambda x: x and x.endswith('_ctl04_lbl_A_PB_S_AVG'),
-                'Slugging': lambda x: x and x.endswith('_ctl04_lbl_A_PB_S_SLG'),
-                'At Bats': lambda x: x and 'ctl04_lblAB' in x,
-                'ERA': lambda x: x and 'ctl04_lblERA' in x,
-                'Innings Pitched': lambda x: x and 'ctl04_lblIP' in x,
-                'WHIP': lambda x: x and 'ctl04_lblWHIP' in x,
-                'Strike %': lambda x: x and 'ctl04_lblSPercent' in x
+                'OPS': lambda x: x and 'lbl_a_pb_s_ops' in x,
+                'Batting Average': lambda x: x and 'lbl_a_pb_s_avg' in x,
+                'Slugging': lambda x: x and 'lbl_a_pb_s_slg' in x,
+                'At Bats': lambda x: x and 'lblab' in x.replace('_', ''),
+                'ERA': lambda x: x and 'lblera' in x.replace('_', ''),
+                'Innings Pitched': lambda x: x and 'lblip' in x.replace('_', ''),
+                'WHIP': lambda x: x and 'lblwhip' in x.replace('_', ''),
+                'Strike %': lambda x: x and 'lblspercent' in x.replace('_', ''),
             }
-            
+
             stats_found = 0
-            
-            # Extract all statistics using the defined patterns
+
+            # Extract all statistics using the defined patterns (case-insensitive)
             for stat_name, pattern_func in stat_patterns.items():
-                span = soup.find('span', {'id': pattern_func})
+                span = soup.find('span', {'id': lambda x: x and pattern_func(x.lower())})
                 if span:
                     value = span.get_text(strip=True)
                     if self._is_valid_stat(value):
                         player_data[stat_name] = value
                         self.logger.info(f"✅ {stat_name}: {value}")
                         stats_found += 1
-            
+
+            # Fallback: if the id patterns found nothing, try reading the stat
+            # tables by their column headers (AVG/OPS/SLG/ERA/IP/WHIP). This is
+            # layout-independent and survives most ASP.NET id changes.
+            if stats_found == 0:
+                stats_found += self._extract_stats_from_tables(soup, player_data)
+
             # FB Velo from PG Career Progression (lblTopStat when stat name is FB Velo)
             stat_name_span = soup.find('span', {'id': lambda x: x and 'lblStatName' in x})
             if stat_name_span and stat_name_span.get_text(strip=True).lower() == 'fb velo':
@@ -546,6 +591,90 @@ class PerfectGameScraper:
             return True
         
         return False
+
+    def _extract_stats_from_tables(self, soup, player_data):
+        """
+        Layout-independent fallback: read stat tables by column header.
+
+        Maps common headers (AVG, OPS, SLG, ERA, IP, WHIP, AB) to our fields
+        and pulls the first valid numeric value found in that column. Survives
+        ASP.NET id changes because it keys on visible header text, not ids.
+        """
+        header_to_field = {
+            'avg': 'Batting Average', 'ba': 'Batting Average',
+            'ops': 'OPS', 'slg': 'Slugging', 'ab': 'At Bats',
+            'era': 'ERA', 'ip': 'Innings Pitched', 'whip': 'WHIP',
+            'k%': 'Strike %', 'strike%': 'Strike %',
+        }
+        found = 0
+        for table in soup.find_all('table'):
+            rows = table.find_all('tr')
+            if len(rows) < 2:
+                continue
+            headers = [c.get_text(strip=True).lower().replace(' ', '')
+                       for c in rows[0].find_all(['th', 'td'])]
+            if not any(h in header_to_field for h in headers):
+                continue
+            # Use the first data row that carries numeric values
+            for row in rows[1:]:
+                cells = [c.get_text(strip=True) for c in row.find_all(['td', 'th'])]
+                if not cells:
+                    continue
+                for idx, header in enumerate(headers):
+                    field = header_to_field.get(header)
+                    if not field or idx >= len(cells):
+                        continue
+                    if player_data.get(field, 'N/A') != 'N/A':
+                        continue  # already filled from a better source
+                    if self._is_valid_stat(cells[idx]):
+                        player_data[field] = cells[idx]
+                        self.logger.info(f"✅ {field} (table): {cells[idx]}")
+                        found += 1
+                if found:
+                    break
+        if found:
+            self.logger.info(f"✅ Recovered {found} stats via header-based table parse")
+        return found
+
+    def dump_diagnostics(self, profile_url, out_path='pg_profile_dump.html'):
+        """
+        Capture the live (authenticated) profile so you can see exactly what
+        the new page looks like. Saves raw HTML and prints every label-style
+        span id plus all table headers — that's the fastest way to discover
+        the new control names after a PG redesign.
+        """
+        self.authenticate()
+        self.logger.info(f"🔬 Diagnostic fetch: {profile_url}")
+        resp = self.session.get(profile_url)
+        resp.raise_for_status()
+
+        with open(out_path, 'w', encoding='utf-8') as fh:
+            fh.write(resp.text)
+        print(f"\n💾 Raw HTML saved to {out_path} ({len(resp.text)} chars)")
+
+        soup = BeautifulSoup(resp.content, 'html.parser')
+
+        print(f"\n🔒 Paywall gate detected: {self._is_paywalled(soup)}")
+
+        print("\n🏷️  Spans with a 'lbl' id (id -> text):")
+        seen = 0
+        for span in soup.find_all('span', id=True):
+            sid = span.get('id', '')
+            if 'lbl' in sid.lower():
+                txt = span.get_text(strip=True)[:40]
+                print(f"   {sid}  ->  {txt!r}")
+                seen += 1
+        if not seen:
+            print("   (none found — stats may be JS-loaded or fully gated)")
+
+        print("\n📊 Tables and their headers:")
+        for i, table in enumerate(soup.find_all('table')):
+            rows = table.find_all('tr')
+            if not rows:
+                continue
+            headers = [c.get_text(strip=True) for c in rows[0].find_all(['th', 'td'])]
+            if any(headers):
+                print(f"   table[{i}] ({len(rows)} rows): {headers}")
     
     def save_to_csv(self, players, filename):
         """Save player data to CSV file with optimized column ordering."""
@@ -583,6 +712,9 @@ def main():
     parser = argparse.ArgumentParser(description='Perfect Game scraper with working authentication')
     parser.add_argument('team_id', nargs='?', help='Perfect Game team ID (e.g., 967917)')
     parser.add_argument('--test-profile', help='Test with a single player profile URL')
+    parser.add_argument('--dump-html', metavar='PROFILE_URL',
+                        help='Diagnostic: save raw profile HTML and print all label '
+                             'span ids + table headers (use after a PG redesign)')
     parser.add_argument('-u', '--username', help='Perfect Game username')
     parser.add_argument('-p', '--password', help='Perfect Game password')
     parser.add_argument('-o', '--output', default='team_stats.csv', help='Output CSV filename')
@@ -594,13 +726,15 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     # Validate arguments
-    if not args.test_profile and not args.team_id:
+    if not args.test_profile and not args.team_id and not args.dump_html:
         print("❌ Please provide either a team ID or --test-profile URL")
         print("\nExamples:")
         print("  Team scraping:")
         print("    python3 pg_scraper.py 967917 --username 'email' --password 'pass'")
         print("  Single player test:")
         print("    python3 pg_scraper.py --test-profile 'https://www.perfectgame.org/Players/Playerprofile.aspx?ID=1161417' --username 'email' --password 'pass'")
+        print("  Diagnose a redesigned page:")
+        print("    python3 pg_scraper.py --dump-html 'https://www.perfectgame.org/Players/Playerprofile.aspx?ID=1161417' --username 'email' --password 'pass'")
         sys.exit(1)
     
     # Convert team ID or URL to (team_id, team_url)
@@ -613,7 +747,14 @@ def main():
     
     try:
         scraper = PerfectGameScraper(username=args.username, password=args.password)
-        
+
+        # Diagnostic dump mode
+        if args.dump_html:
+            print("🔬 DIAGNOSTIC HTML DUMP")
+            print("="*60)
+            scraper.dump_diagnostics(args.dump_html)
+            return
+
         # Test profile mode
         if args.test_profile:
             print("🧪 TESTING SINGLE PLAYER PROFILE")
